@@ -195,16 +195,16 @@
                 <div class="meta-row">
                   <label>
                     <span>Organization</span>
-                    <input name="organization" placeholder="Optional OpenAI organization">
+                    <input name="organization" value="{{ default_openai_organization }}" placeholder="Optional OpenAI organization">
                   </label>
                   <label>
                     <span>Project</span>
-                    <input name="project" placeholder="Optional OpenAI project">
+                    <input name="project" value="{{ default_openai_project }}" placeholder="Optional OpenAI project">
                   </label>
                 </div>
                 <label>
                   <span>Model</span>
-                  <input name="model" placeholder="llama3.2">
+                  <input name="model" value="{{ default_ollama_model }}" placeholder="llama3.2">
                 </label>
                 <div class="meta-row">
                   <label>
@@ -326,7 +326,7 @@
                   <h4>GitHub search</h4>
               <label>
                 <span>Base URL</span>
-                <input name="base_url" value="https://api.github.com">
+                <input name="base_url" value="{{ default_github_base_url }}">
               </label>
               <label>
                 <span>Search type</span>
@@ -342,7 +342,7 @@
               </label>
               <label>
                 <span>Repository qualifier</span>
-                <input name="repository" placeholder="owner/repo for code or issues">
+                <input name="repository" value="{{ default_github_repository }}" placeholder="owner/repo for code or issues">
               </label>
               <label>
                 <span>Limit</span>
@@ -446,7 +446,7 @@
                 </label>
                 <label>
                   <span>Default model</span>
-                  <input name="default_model" placeholder="gpt-4.1-mini or hosted compatible model">
+                  <input name="default_model" value="{{ default_openai_model }}" placeholder="gpt-4.1-mini or hosted compatible model">
                 </label>
                 <label>
                   <span>API key</span>
@@ -455,11 +455,11 @@
                 <div class="meta-row">
                   <label>
                     <span>Organization</span>
-                    <input name="organization" placeholder="Optional">
+                    <input name="organization" value="{{ default_openai_organization }}" placeholder="Optional">
                   </label>
                   <label>
                     <span>Project</span>
-                    <input name="project" placeholder="Optional">
+                    <input name="project" value="{{ default_openai_project }}" placeholder="Optional">
                   </label>
                 </div>
                 <label class="checkbox-field">
@@ -626,6 +626,18 @@
     </button>
   </template>
 
+  <script>
+    window.FORGETUNE_DEFAULTS = {
+      providerBaseUrls: {
+        openai: {{ default_openai_base_url|tojson }},
+        "openai-compatible": {{ default_openai_base_url|tojson }},
+        ollama: {{ default_ollama_base_url|tojson }}
+      },
+      defaultOpenaiOrganization: {{ default_openai_organization|tojson }},
+      defaultOpenaiProject: {{ default_openai_project|tojson }},
+      defaultOpenaiModel: {{ default_openai_model|tojson }}
+    };
+  </script>
   <script src="/static/app.js" defer></script>
 </body>
 </html>

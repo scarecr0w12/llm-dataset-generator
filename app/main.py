@@ -11,6 +11,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request,
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
@@ -43,12 +44,21 @@ from app.services.llm import (
 
 
 BASE_DIR = Path(__file__).resolve().parent
+ROOT_DIR = BASE_DIR.parent
+load_dotenv(ROOT_DIR / ".env")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 DEFAULT_OLLAMA_BASE_URL = os.getenv("FORGETUNE_OLLAMA_BASE_URL", "http://host.docker.internal:11434")
+DEFAULT_OLLAMA_MODEL = os.getenv("FORGETUNE_OLLAMA_MODEL", "")
 DEFAULT_OPENAI_BASE_URL = os.getenv("FORGETUNE_OPENAI_BASE_URL", "https://api.openai.com")
 DEFAULT_OPENAI_API_KEY = os.getenv("FORGETUNE_OPENAI_API_KEY", "")
+DEFAULT_OPENAI_ORGANIZATION = os.getenv("FORGETUNE_OPENAI_ORGANIZATION", "")
+DEFAULT_OPENAI_PROJECT = os.getenv("FORGETUNE_OPENAI_PROJECT", "")
+DEFAULT_OPENAI_MODEL = os.getenv("FORGETUNE_OPENAI_MODEL", "")
 DEFAULT_SEARXNG_BASE_URL = os.getenv("FORGETUNE_SEARXNG_BASE_URL", "http://host.docker.internal:8080")
+DEFAULT_GITHUB_BASE_URL = os.getenv("FORGETUNE_GITHUB_BASE_URL", "https://api.github.com")
+DEFAULT_GITHUB_TOKEN = os.getenv("FORGETUNE_GITHUB_TOKEN", "")
+DEFAULT_GITHUB_REPOSITORY = os.getenv("FORGETUNE_GITHUB_REPOSITORY", "")
 CRAWLER_SERVICE_URL = os.getenv("FORGETUNE_CRAWLER_SERVICE_URL", "").rstrip("/")
 
 
@@ -100,8 +110,8 @@ class SyntheticRequest(BaseModel):
     provider: str = Field(default="ollama")
     base_url: str = Field(default=DEFAULT_OLLAMA_BASE_URL)
     api_key: str | None = None
-    organization: str = ""
-    project: str = ""
+    organization: str = DEFAULT_OPENAI_ORGANIZATION
+    project: str = DEFAULT_OPENAI_PROJECT
     verify_ssl: bool | None = None
     model: str = ""
     prompt: str
@@ -178,14 +188,14 @@ class WebImportRequest(ExternalImportRequest):
 
 
 class GitHubImportRequest(ExternalImportRequest):
-    base_url: str = Field(default="https://api.github.com")
+    base_url: str = Field(default=DEFAULT_GITHUB_BASE_URL)
     query: str = Field(min_length=1)
     search_type: str = Field(default="repositories")
     limit: int = Field(default=5, ge=1, le=25)
-    repository: str = ""
+    repository: str = DEFAULT_GITHUB_REPOSITORY
     sort: str = ""
     order: str = Field(default="desc")
-    token: str | None = None
+    token: str | None = DEFAULT_GITHUB_TOKEN or None
     include_readme: bool = True
 
 
@@ -317,8 +327,16 @@ def resolve_runtime_config(
         base_url = DEFAULT_OPENAI_BASE_URL
     if provider == "openai" and not api_key:
         api_key = DEFAULT_OPENAI_API_KEY
+    if provider == "openai" and not organization:
+        organization = DEFAULT_OPENAI_ORGANIZATION
+    if provider == "openai" and not project:
+        project = DEFAULT_OPENAI_PROJECT
     if provider == "ollama" and not base_url:
         base_url = DEFAULT_OLLAMA_BASE_URL
+    if provider == "openai" and not model:
+        model = DEFAULT_OPENAI_MODEL
+    if provider == "ollama" and not model:
+        model = DEFAULT_OLLAMA_MODEL
     if not model:
         raise HTTPException(status_code=400, detail="Model is required")
     try:
@@ -340,13 +358,20 @@ def provider_profile_to_config(profile: ProviderProfile, model: str = "") -> LLM
     api_key = profile.api_key
     if profile.provider_type == "openai" and not api_key:
         api_key = DEFAULT_OPENAI_API_KEY
+    organization = profile.organization or (DEFAULT_OPENAI_ORGANIZATION if profile.provider_type == "openai" else "")
+    project = profile.project or (DEFAULT_OPENAI_PROJECT if profile.provider_type == "openai" else "")
+    resolved_model = model or profile.default_model
+    if not resolved_model and profile.provider_type == "openai":
+        resolved_model = DEFAULT_OPENAI_MODEL
+    if not resolved_model and profile.provider_type == "ollama":
+        resolved_model = DEFAULT_OLLAMA_MODEL
     return LLMConfig(
         provider=profile.provider_type,
         base_url=profile.base_url,
-        model=model or profile.default_model,
+        model=resolved_model,
         api_key=api_key,
-        organization=profile.organization,
-        project=profile.project,
+        organization=organization,
+        project=project,
         verify_ssl=profile.verify_ssl,
     )
 
@@ -481,8 +506,14 @@ async def index(request: Request) -> HTMLResponse:
             "github_search_types": SUPPORTED_GITHUB_SEARCH_TYPES,
             "llm_provider_types": sorted(SUPPORTED_LLM_PROVIDERS),
             "default_ollama_base_url": DEFAULT_OLLAMA_BASE_URL,
+            "default_ollama_model": DEFAULT_OLLAMA_MODEL,
             "default_openai_base_url": DEFAULT_OPENAI_BASE_URL,
+            "default_openai_organization": DEFAULT_OPENAI_ORGANIZATION,
+            "default_openai_project": DEFAULT_OPENAI_PROJECT,
+            "default_openai_model": DEFAULT_OPENAI_MODEL,
             "default_searxng_base_url": DEFAULT_SEARXNG_BASE_URL,
+            "default_github_base_url": DEFAULT_GITHUB_BASE_URL,
+            "default_github_repository": DEFAULT_GITHUB_REPOSITORY,
         },
     )
 
@@ -1022,6 +1053,12 @@ async def import_github_source(
     db: Annotated[Session, Depends(get_db)],
 ) -> dict[str, Any]:
     dataset_or_404(db, dataset_id)
+    if not payload.base_url:
+        payload.base_url = DEFAULT_GITHUB_BASE_URL
+    if not payload.token and DEFAULT_GITHUB_TOKEN:
+        payload.token = DEFAULT_GITHUB_TOKEN
+    if not payload.repository and DEFAULT_GITHUB_REPOSITORY:
+        payload.repository = DEFAULT_GITHUB_REPOSITORY
     try:
         records = await import_from_github(**payload.model_dump())
     except Exception as exc:

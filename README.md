@@ -15,6 +15,12 @@ ForgeTune is a self-hosted, Dockerized utility for building and managing LLM fin
 
 ## Run with Docker
 
+Create a local env file first:
+
+```bash
+cp .env.example .env
+```
+
 ```bash
 docker compose up --build -d
 ```
@@ -28,7 +34,7 @@ The compose stack now brings up four services together:
 - An internal crawler service that handles SearxNG and web-acquisition requests for the main app
 - A Valkey cache backing the SearxNG container
 
-By default, the ForgeTune container points its SearxNG integration at the bundled `searxng` service and forwards web-crawl and SearxNG imports to the internal `crawler` service. If you want synthetic generation to hit Ollama running on the Docker host, leave `FORGETUNE_OLLAMA_BASE_URL` at its default `http://host.docker.internal:11434` value. If you want the backend to have a default OpenAI connection, set `FORGETUNE_OPENAI_API_KEY` and optionally override `FORGETUNE_OPENAI_BASE_URL`.
+By default, the ForgeTune container points its SearxNG integration at the bundled `searxng` service and forwards web-crawl and SearxNG imports to the internal `crawler` service. If you want synthetic generation to hit Ollama running on the Docker host, leave `FORGETUNE_OLLAMA_BASE_URL` at its default `http://host.docker.internal:11434` value. If you want the backend to have default OpenAI or GitHub settings, put them in `.env` before starting the stack.
 
 ## Local development
 
@@ -39,10 +45,24 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
+`app.main` loads `.env` automatically, so the same file works for local development and Docker Compose.
+
+## Environment variables
+
+Use `.env.example` as the starting point for `.env`. The most useful settings are:
+
+- `FORGETUNE_OPENAI_BASE_URL`, `FORGETUNE_OPENAI_API_KEY`, `FORGETUNE_OPENAI_ORGANIZATION`, `FORGETUNE_OPENAI_PROJECT`, `FORGETUNE_OPENAI_MODEL`
+- `FORGETUNE_OLLAMA_BASE_URL`, `FORGETUNE_OLLAMA_MODEL`
+- `FORGETUNE_GITHUB_BASE_URL`, `FORGETUNE_GITHUB_TOKEN`, `FORGETUNE_GITHUB_REPOSITORY`
+- `FORGETUNE_SEARXNG_BASE_URL`
+- `FORGETUNE_CRAWLER_SERVICE_URL`
+
+These values are used as startup defaults for the UI and backend. Secrets such as API keys and GitHub tokens are read server-side and used as fallbacks when the corresponding form field is left blank.
+
 ## LLM providers and assistance
 
 - Saved provider profiles live in the Operate tab and can target `openai`, `openai-compatible`, or `ollama` endpoints.
-- OpenAI: use `https://api.openai.com` and either store the API key in a saved provider profile or pass `FORGETUNE_OPENAI_API_KEY` into the container.
+- OpenAI: use `https://api.openai.com` and either store the API key in a saved provider profile or set `FORGETUNE_OPENAI_API_KEY` in `.env`.
 - Ollama: use `http://host.docker.internal:11434` from inside Docker.
 - vLLM or other OpenAI-compatible APIs: point the base URL to the server root, for example `http://host.docker.internal:8001` if that service exposes `/v1/chat/completions`, `/v1/models`, `/v1/files`, and `/v1/fine_tuning/jobs`.
 - The Capture tab can use a saved provider profile or an ad hoc authenticated request for synthetic example generation.
@@ -59,7 +79,7 @@ uvicorn app.main:app --reload
 
 - SearxNG: the default base URL is now the bundled compose service at `http://searxng:8080` from inside ForgeTune, and `http://localhost:8080` from your browser if you want to inspect the search UI directly.
 - Web crawl: seed one or more URLs, keep the crawl same-domain by default, and import the extracted page text as draft examples for later annotation.
-- GitHub: search repositories, code, or issues via the GitHub REST API. Add a personal access token if you need higher rate limits or private-resource access.
+- GitHub: search repositories, code, or issues via the GitHub REST API. Add a personal access token if you need higher rate limits or private-resource access. You can also set `FORGETUNE_GITHUB_TOKEN` in `.env` so GitHub imports use it automatically when the form token field is empty.
 - If an internal service or intercepted network path presents a non-standard TLS certificate, you can disable HTTPS verification for that specific import from the UI. Leave verification enabled for normal public endpoints.
 
 ## Notes

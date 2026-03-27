@@ -14,10 +14,12 @@ const state = {
   },
 };
 
+const appDefaults = window.FORGETUNE_DEFAULTS || {};
+
 const providerDefaults = {
-  openai: "https://api.openai.com",
-  "openai-compatible": "https://api.openai.com",
-  ollama: "http://host.docker.internal:11434",
+  openai: appDefaults.providerBaseUrls?.openai || "https://api.openai.com",
+  "openai-compatible": appDefaults.providerBaseUrls?.["openai-compatible"] || "https://api.openai.com",
+  ollama: appDefaults.providerBaseUrls?.ollama || "http://host.docker.internal:11434",
 };
 
 const elements = {
@@ -298,10 +300,10 @@ function setProviderForm(provider) {
   field(elements.providerForm, "name").value = provider?.name || "";
   field(elements.providerForm, "provider_type").value = provider?.provider_type || "openai-compatible";
   field(elements.providerForm, "base_url").value = provider?.base_url || providerDefaults[provider?.provider_type || "openai-compatible"];
-  field(elements.providerForm, "default_model").value = provider?.default_model || "";
+  field(elements.providerForm, "default_model").value = provider?.default_model || appDefaults.defaultOpenaiModel || "";
   field(elements.providerForm, "api_key").value = "";
-  field(elements.providerForm, "organization").value = provider?.organization || "";
-  field(elements.providerForm, "project").value = provider?.project || "";
+  field(elements.providerForm, "organization").value = provider?.organization || appDefaults.defaultOpenaiOrganization || "";
+  field(elements.providerForm, "project").value = provider?.project || appDefaults.defaultOpenaiProject || "";
   field(elements.providerForm, "verify_ssl").checked = provider?.verify_ssl ?? true;
 }
 
