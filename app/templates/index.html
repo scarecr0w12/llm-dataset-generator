@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ForgeTune</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar card">
+      <div class="brand">
+        <div>
+          <p class="eyebrow">Self-hosted LLM data ops</p>
+          <h1>ForgeTune</h1>
+        </div>
+        <button id="refreshDatasets" class="ghost-button">Refresh</button>
+      </div>
+
+      <form id="datasetForm" class="stacked-form">
+        <h2>Dataset</h2>
+        <label>
+          <span>Name</span>
+          <input name="name" placeholder="Support FAQ" required>
+        </label>
+        <label>
+          <span>Schema</span>
+          <select name="schema_name">
+            {% for schema in schemas %}
+            <option value="{{ schema }}">{{ schema }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>
+          <span>Description</span>
+          <textarea name="description" rows="3" placeholder="What this dataset is for"></textarea>
+        </label>
+        <div class="form-actions">
+          <button type="submit">Create dataset</button>
+          <button type="button" id="datasetUpdateButton" class="ghost-button">Update selected</button>
+          <button type="button" id="datasetDeleteButton" class="danger-button">Delete selected</button>
+        </div>
+      </form>
+
+      <div>
+        <h2>Datasets</h2>
+        <div id="datasetList" class="dataset-list"></div>
+      </div>
+    </aside>
+
+    <main class="main-panel">
+      <section class="hero card">
+        <div>
+          <p class="eyebrow">Dataset workbench</p>
+          <h2 id="datasetTitle">Select or create a dataset</h2>
+          <p id="datasetDescription">Use the controls on the left to create a dataset, import records, curate them, and export for training.</p>
+        </div>
+        <div class="stats-grid">
+          <div>
+            <span>Examples</span>
+            <strong id="statExamples">0</strong>
+          </div>
+          <div>
+            <span>Tokens</span>
+            <strong id="statTokens">0</strong>
+          </div>
+          <div>
+            <span>Schema</span>
+            <strong id="statSchema">-</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace-grid">
+        <section class="card section-panel">
+          <div class="section-header">
+            <div>
+              <p class="eyebrow">Acquire</p>
+              <h3>Add or import examples</h3>
+            </div>
+          </div>
+
+          <form id="manualExampleForm" class="stacked-form two-column">
+            <label>
+              <span>Instruction</span>
+              <textarea name="instruction" rows="4" placeholder="Summarize the following support ticket"></textarea>
+            </label>
+            <label>
+              <span>Output</span>
+              <textarea name="output_text" rows="4" placeholder="Assistant response"></textarea>
+            </label>
+            <label>
+              <span>Input / Context</span>
+              <textarea name="input_text" rows="4" placeholder="Optional grounding context"></textarea>
+            </label>
+            <label>
+              <span>System Prompt</span>
+              <textarea name="system_prompt" rows="4" placeholder="Optional system instruction"></textarea>
+            </label>
+            <label>
+              <span>Labels (comma separated)</span>
+              <input name="labels" placeholder="faq, support, billing">
+            </label>
+            <label>
+              <span>Status</span>
+              <select name="status">
+                <option value="draft">draft</option>
+                <option value="reviewed">reviewed</option>
+                <option value="approved">approved</option>
+              </select>
+            </label>
+            <div class="form-actions full-span">
+              <button type="submit">Add example</button>
+            </div>
+          </form>
+
+          <div class="subgrid">
+            <form id="uploadForm" class="stacked-form">
+              <h4>Bulk upload</h4>
+              <label>
+                <span>Schema hint</span>
+                <select name="schema_name">
+                  {% for schema in schemas %}
+                  <option value="{{ schema }}">{{ schema }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label>
+                <span>File</span>
+                <input type="file" name="upload" accept=".json,.jsonl,.csv,.parquet" required>
+              </label>
+              <button type="submit">Import file</button>
+            </form>
+
+            <form id="syntheticForm" class="stacked-form">
+              <h4>Synthetic generation</h4>
+              <label>
+                <span>Provider</span>
+                <select name="provider">
+                  <option value="ollama">ollama</option>
+                  <option value="openai-compatible">openai-compatible</option>
+                </select>
+              </label>
+              <label>
+                <span>Base URL</span>
+                <input name="base_url" value="http://host.docker.internal:11434">
+              </label>
+              <label>
+                <span>Model</span>
+                <input name="model" placeholder="llama3.2">
+              </label>
+              <label>
+                <span>Count</span>
+                <input name="count" type="number" min="1" max="100" value="5">
+              </label>
+              <label>
+                <span>Temperature</span>
+                <input name="temperature" type="number" min="0" max="2" step="0.1" value="0.7">
+              </label>
+              <label>
+                <span>Prompt</span>
+                <textarea name="prompt" rows="5" placeholder="Generate high-quality support chatbot examples for subscription management."></textarea>
+              </label>
+              <button type="submit">Generate examples</button>
+            </form>
+          </div>
+
+          <div class="subgrid integration-grid">
+            <form id="searxngForm" class="stacked-form">
+              <h4>SearxNG import</h4>
+              <label>
+                <span>Base URL</span>
+                <input name="base_url" value="http://host.docker.internal:8080">
+              </label>
+              <label>
+                <span>Query</span>
+                <input name="query" placeholder="retrieval augmented generation benchmarks">
+              </label>
+              <label>
+                <span>Limit</span>
+                <input name="limit" type="number" min="1" max="25" value="5">
+              </label>
+              <label>
+                <span>Language</span>
+                <input name="language" value="all">
+              </label>
+              <label>
+                <span>Categories</span>
+                <input name="categories" placeholder="science, it">
+              </label>
+              <label>
+                <span>Engines</span>
+                <input name="engines" placeholder="google, duckduckgo">
+              </label>
+              <label>
+                <span>Instruction template</span>
+                <textarea name="instruction" rows="4">Answer the user using the source context.</textarea>
+              </label>
+              <label>
+                <span>Labels</span>
+                <input name="labels" placeholder="research, search">
+              </label>
+              <label class="checkbox-field">
+                <input type="checkbox" name="crawl_pages">
+                <span>Fetch result pages for full text</span>
+              </label>
+              <button type="submit">Import search results</button>
+            </form>
+
+            <form id="webImportForm" class="stacked-form">
+              <h4>Web crawl</h4>
+              <label>
+                <span>URLs</span>
+                <textarea name="urls" rows="5" placeholder="https://example.com/docs\nhttps://example.com/blog"></textarea>
+              </label>
+              <label>
+                <span>Max pages</span>
+                <input name="max_pages" type="number" min="1" max="50" value="5">
+              </label>
+              <label>
+                <span>Max depth</span>
+                <input name="max_depth" type="number" min="0" max="3" value="1">
+              </label>
+              <label>
+                <span>Include URL patterns</span>
+                <input name="include_patterns" placeholder="/docs, /guide">
+              </label>
+              <label>
+                <span>Exclude URL patterns</span>
+                <input name="exclude_patterns" placeholder="/login, /privacy">
+              </label>
+              <label>
+                <span>Instruction template</span>
+                <textarea name="instruction" rows="4">Answer the user using the crawled page context.</textarea>
+              </label>
+              <label>
+                <span>Labels</span>
+                <input name="labels" placeholder="docs, crawl">
+              </label>
+              <label class="checkbox-field">
+                <input type="checkbox" name="same_domain_only" checked>
+                <span>Stay on the same domain</span>
+              </label>
+              <button type="submit">Crawl and import</button>
+            </form>
+
+            <form id="githubForm" class="stacked-form">
+              <h4>GitHub search</h4>
+              <label>
+                <span>Base URL</span>
+                <input name="base_url" value="https://api.github.com">
+              </label>
+              <label>
+                <span>Search type</span>
+                <select name="search_type">
+                  {% for search_type in github_search_types %}
+                  <option value="{{ search_type }}">{{ search_type }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label>
+                <span>Query</span>
+                <input name="query" placeholder="topic:rag language:python vector db">
+              </label>
+              <label>
+                <span>Repository qualifier</span>
+                <input name="repository" placeholder="owner/repo for code or issues">
+              </label>
+              <label>
+                <span>Limit</span>
+                <input name="limit" type="number" min="1" max="25" value="5">
+              </label>
+              <label>
+                <span>Token</span>
+                <input name="token" type="password" placeholder="Optional GitHub personal access token">
+              </label>
+              <label>
+                <span>Instruction template</span>
+                <textarea name="instruction" rows="4">Answer the user using the GitHub source context.</textarea>
+              </label>
+              <label>
+                <span>Labels</span>
+                <input name="labels" placeholder="github, code-search">
+              </label>
+              <label class="checkbox-field">
+                <input type="checkbox" name="include_readme" checked>
+                <span>Include repository README when available</span>
+              </label>
+              <button type="submit">Import GitHub results</button>
+            </form>
+          </div>
+
+          <div id="integrationResult" class="notice">No external imports run yet.</div>
+        </section>
+
+        <section class="card section-panel">
+          <div class="section-header">
+            <div>
+              <p class="eyebrow">Curate</p>
+              <h3>Clean, dedupe, and estimate tokens</h3>
+            </div>
+          </div>
+          <form id="curationForm" class="stacked-form inline-form">
+            <label>
+              <span>Tokenizer</span>
+              <select name="tokenizer_name">
+                <option value="cl100k_base">cl100k_base</option>
+                <option value="o200k_base">o200k_base</option>
+                <option value="p50k_base">p50k_base</option>
+              </select>
+            </label>
+            <label class="checkbox-field">
+              <input type="checkbox" name="drop_empty" checked>
+              <span>Drop empty rows</span>
+            </label>
+            <label class="checkbox-field">
+              <input type="checkbox" name="deduplicate" checked>
+              <span>Deduplicate by content hash</span>
+            </label>
+            <button type="submit">Run curation</button>
+          </form>
+          <div id="curationResult" class="notice">No curation run yet.</div>
+        </section>
+
+        <section class="card section-panel annotation-panel">
+          <div class="section-header">
+            <div>
+              <p class="eyebrow">Annotate</p>
+              <h3>Review and label examples</h3>
+            </div>
+          </div>
+          <div class="annotation-layout">
+            <div id="exampleTable" class="example-table"></div>
+            <form id="annotationForm" class="stacked-form">
+              <input type="hidden" name="id">
+              <label>
+                <span>Instruction</span>
+                <textarea name="instruction" rows="4"></textarea>
+              </label>
+              <label>
+                <span>Input / Context</span>
+                <textarea name="input_text" rows="4"></textarea>
+              </label>
+              <label>
+                <span>Output</span>
+                <textarea name="output_text" rows="4"></textarea>
+              </label>
+              <label>
+                <span>System Prompt</span>
+                <textarea name="system_prompt" rows="3"></textarea>
+              </label>
+              <label>
+                <span>Labels</span>
+                <input name="labels">
+              </label>
+              <label>
+                <span>Status</span>
+                <select name="status">
+                  <option value="draft">draft</option>
+                  <option value="reviewed">reviewed</option>
+                  <option value="approved">approved</option>
+                </select>
+              </label>
+              <div class="form-actions">
+                <button type="submit">Save changes</button>
+                <button type="button" id="deleteExampleButton" class="danger-button">Delete example</button>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        <section class="card section-panel">
+          <div class="section-header">
+            <div>
+              <p class="eyebrow">Export</p>
+              <h3>Training-ready downloads</h3>
+            </div>
+          </div>
+          <form id="exportForm" class="stacked-form inline-form">
+            <label>
+              <span>Format</span>
+              <select name="export_format">
+                {% for export_name in exports %}
+                <option value="{{ export_name }}">{{ export_name }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <button type="submit">Download export</button>
+          </form>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <template id="datasetItemTemplate">
+    <button class="dataset-item">
+      <span class="dataset-name"></span>
+      <span class="dataset-meta"></span>
+    </button>
+  </template>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

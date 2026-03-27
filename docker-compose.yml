@@ -1,0 +1,13 @@
+services:
+  forgetune:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: forgetune
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
