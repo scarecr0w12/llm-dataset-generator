@@ -1,9 +1,11 @@
 import json
+import os
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Annotated, Any
 
+import httpx
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -29,6 +31,10 @@ from app.services.llm import generate_examples
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+
+DEFAULT_OLLAMA_BASE_URL = os.getenv("FORGETUNE_OLLAMA_BASE_URL", "http://host.docker.internal:11434")
+DEFAULT_SEARXNG_BASE_URL = os.getenv("FORGETUNE_SEARXNG_BASE_URL", "http://host.docker.internal:8080")
+CRAWLER_SERVICE_URL = os.getenv("FORGETUNE_CRAWLER_SERVICE_URL", "").rstrip("/")
 
 
 @asynccontextmanager
@@ -76,7 +82,7 @@ class CurationRequest(BaseModel):
 
 class SyntheticRequest(BaseModel):
     provider: str = Field(default="ollama")
-    base_url: str = Field(default="http://host.docker.internal:11434")
+    base_url: str = Field(default=DEFAULT_OLLAMA_BASE_URL)
     model: str
     prompt: str
     count: int = Field(default=5, ge=1, le=100)
@@ -94,7 +100,7 @@ class ExternalImportRequest(BaseModel):
 
 
 class SearxngImportRequest(ExternalImportRequest):
-    base_url: str = Field(default="http://host.docker.internal:8080")
+    base_url: str = Field(default=DEFAULT_SEARXNG_BASE_URL)
     query: str = Field(min_length=1)
     limit: int = Field(default=5, ge=1, le=25)
     categories: str = ""
@@ -219,6 +225,53 @@ def add_examples(db: Session, dataset_id: int, records: list[dict[str, Any]]) ->
     return added
 
 
+async def run_searxng_import(payload: SearxngImportRequest) -> list[dict[str, Any]]:
+    return await import_from_searxng(**payload.model_dump())
+
+
+async def run_web_import(payload: WebImportRequest) -> list[dict[str, Any]]:
+    urls = [line.strip() for line in payload.urls.splitlines() if line.strip()]
+    return await import_from_web(
+        urls=urls,
+        max_pages=payload.max_pages,
+        max_depth=payload.max_depth,
+        same_domain_only=payload.same_domain_only,
+        include_patterns=payload.include_patterns,
+        exclude_patterns=payload.exclude_patterns,
+        max_chars=payload.max_chars,
+        instruction=payload.instruction,
+        system_prompt=payload.system_prompt,
+        labels=payload.labels,
+        status=payload.status,
+        tokenizer_name=payload.tokenizer_name,
+        verify_ssl=payload.verify_ssl,
+    )
+
+
+async def request_crawler_records(path: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
+    if not CRAWLER_SERVICE_URL:
+        raise ValueError("Crawler service URL is not configured")
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0)) as client:
+            response = await client.post(f"{CRAWLER_SERVICE_URL}{path}", json=payload)
+            response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        detail = exc.response.text
+        try:
+            detail = exc.response.json().get("detail") or detail
+        except ValueError:
+            pass
+        raise ValueError(detail) from exc
+    except httpx.HTTPError as exc:
+        raise ValueError(f"Unable to reach crawler service at {CRAWLER_SERVICE_URL}: {exc}") from exc
+
+    records = response.json().get("records")
+    if not isinstance(records, list):
+        raise ValueError("Crawler service returned an invalid response")
+    return records
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
@@ -228,6 +281,8 @@ async def index(request: Request) -> HTMLResponse:
             "schemas": SUPPORTED_SCHEMAS,
             "exports": SUPPORTED_EXPORTS,
             "github_search_types": SUPPORTED_GITHUB_SEARCH_TYPES,
+            "default_ollama_base_url": DEFAULT_OLLAMA_BASE_URL,
+            "default_searxng_base_url": DEFAULT_SEARXNG_BASE_URL,
         },
     )
 
@@ -235,6 +290,24 @@ async def index(request: Request) -> HTMLResponse:
 @app.get("/api/health")
 async def healthcheck() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.post("/internal/acquisition/searxng")
+async def internal_searxng_import(payload: SearxngImportRequest) -> dict[str, Any]:
+    try:
+        records = await run_searxng_import(payload)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"records": records}
+
+
+@app.post("/internal/acquisition/web")
+async def internal_web_import(payload: WebImportRequest) -> dict[str, Any]:
+    try:
+        records = await run_web_import(payload)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"records": records}
 
 
 @app.get("/api/datasets")
@@ -412,7 +485,11 @@ async def import_searxng_source(
 ) -> dict[str, Any]:
     dataset_or_404(db, dataset_id)
     try:
-        records = await import_from_searxng(**payload.model_dump())
+        records = (
+            await request_crawler_records("/internal/acquisition/searxng", payload.model_dump())
+            if CRAWLER_SERVICE_URL
+            else await run_searxng_import(payload)
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"SearxNG import failed: {exc}") from exc
 
@@ -427,22 +504,11 @@ async def import_web_source(
     db: Annotated[Session, Depends(get_db)],
 ) -> dict[str, Any]:
     dataset_or_404(db, dataset_id)
-    urls = [line.strip() for line in payload.urls.splitlines() if line.strip()]
     try:
-        records = await import_from_web(
-            urls=urls,
-            max_pages=payload.max_pages,
-            max_depth=payload.max_depth,
-            same_domain_only=payload.same_domain_only,
-            include_patterns=payload.include_patterns,
-            exclude_patterns=payload.exclude_patterns,
-            max_chars=payload.max_chars,
-            instruction=payload.instruction,
-            system_prompt=payload.system_prompt,
-            labels=payload.labels,
-            status=payload.status,
-            tokenizer_name=payload.tokenizer_name,
-            verify_ssl=payload.verify_ssl,
+        records = (
+            await request_crawler_records("/internal/acquisition/web", payload.model_dump())
+            if CRAWLER_SERVICE_URL
+            else await run_web_import(payload)
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Web import failed: {exc}") from exc

@@ -1,0 +1,17 @@
+use_default_settings: true
+
+server:
+  secret_key: "change-this-local-dev-secret"
+  limiter: false
+  image_proxy: true
+
+redis:
+  url: redis://valkey:6379/0
+
+search:
+  safe_search: 1
+  autocomplete: ""
+  default_lang: "all"
+
+ui:
+  static_use_hash: true

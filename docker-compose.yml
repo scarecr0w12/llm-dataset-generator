@@ -8,6 +8,73 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/app/data
+    environment:
+      FORGETUNE_CRAWLER_SERVICE_URL: http://crawler:8000
+      FORGETUNE_SEARXNG_BASE_URL: http://searxng:8080
+      FORGETUNE_OLLAMA_BASE_URL: ${FORGETUNE_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    depends_on:
+      crawler:
+        condition: service_healthy
+      searxng:
+        condition: service_started
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
+
+  crawler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: forgetune-crawler
+    expose:
+      - "8000"
+    environment:
+      FORGETUNE_CRAWLER_SERVICE_URL: ""
+      FORGETUNE_SEARXNG_BASE_URL: http://searxng:8080
+      FORGETUNE_OLLAMA_BASE_URL: ${FORGETUNE_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    depends_on:
+      searxng:
+        condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  valkey:
+    image: docker.io/valkey/valkey:8-alpine
+    container_name: searxng-valkey
+    command: valkey-server --save 30 1 --loglevel warning
+    volumes:
+      - searxng-valkey-data:/data
+    restart: unless-stopped
+
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    container_name: searxng
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./searxng:/etc/searxng:rw
+      - searxng-cache:/var/cache/searxng:rw
+    environment:
+      SEARXNG_BASE_URL: ${SEARXNG_PUBLIC_BASE_URL:-http://localhost:8080/}
+      BIND_ADDRESS: 0.0.0.0:8080
+    depends_on:
+      valkey:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  searxng-cache:
+  searxng-valkey-data:

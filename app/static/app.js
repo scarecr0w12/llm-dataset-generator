@@ -3,6 +3,11 @@ const state = {
   selectedDataset: null,
   examples: [],
   selectedExample: null,
+  activeWorkspaceTab: "review",
+  exampleFilters: {
+    query: "",
+    status: "all",
+  },
 };
 
 const elements = {
@@ -13,6 +18,8 @@ const elements = {
   datasetDeleteButton: document.querySelector("#datasetDeleteButton"),
   datasetTitle: document.querySelector("#datasetTitle"),
   datasetDescription: document.querySelector("#datasetDescription"),
+  activeDatasetMeta: document.querySelector("#activeDatasetMeta"),
+  datasetSchemaBadge: document.querySelector("#datasetSchemaBadge"),
   statExamples: document.querySelector("#statExamples"),
   statTokens: document.querySelector("#statTokens"),
   statSchema: document.querySelector("#statSchema"),
@@ -26,6 +33,10 @@ const elements = {
   curationForm: document.querySelector("#curationForm"),
   curationResult: document.querySelector("#curationResult"),
   exampleTable: document.querySelector("#exampleTable"),
+  exampleSearch: document.querySelector("#exampleSearch"),
+  exampleStatusFilter: document.querySelector("#exampleStatusFilter"),
+  workspaceTabs: Array.from(document.querySelectorAll("[data-tab-target]")),
+  workspacePanels: Array.from(document.querySelectorAll("[data-tab-panel]")),
   annotationForm: document.querySelector("#annotationForm"),
   deleteExampleButton: document.querySelector("#deleteExampleButton"),
   exportForm: document.querySelector("#exportForm"),
@@ -74,6 +85,84 @@ function parseLabels(value) {
     .filter(Boolean);
 }
 
+function setActiveWorkspaceTab(tabName) {
+  state.activeWorkspaceTab = tabName;
+  elements.workspaceTabs.forEach((button) => {
+    const isActive = button.dataset.tabTarget === tabName;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-selected", String(isActive));
+  });
+  elements.workspacePanels.forEach((panel) => {
+    panel.hidden = panel.dataset.tabPanel !== tabName;
+  });
+}
+
+function filterExamples() {
+  const query = state.exampleFilters.query.trim().toLowerCase();
+  const status = state.exampleFilters.status;
+
+  return state.examples.filter((example) => {
+    const matchesStatus = status === "all" || example.status === status;
+    if (!matchesStatus) {
+      return false;
+    }
+    if (!query) {
+      return true;
+    }
+    const haystack = [
+      example.instruction,
+      example.input_text,
+      example.output_text,
+      example.system_prompt,
+      ...(example.labels || []),
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(query);
+  });
+}
+
+function updateActionState() {
+  const hasDataset = Boolean(state.selectedDataset);
+  const hasExample = Boolean(state.selectedExample);
+
+  elements.datasetUpdateButton.disabled = !hasDataset;
+  elements.datasetDeleteButton.disabled = !hasDataset;
+  elements.deleteExampleButton.disabled = !hasExample;
+  Array.from(elements.manualExampleForm.elements).forEach((control) => {
+    if (control.type !== "submit") {
+      control.disabled = !hasDataset;
+    }
+  });
+  Array.from(elements.uploadForm.elements).forEach((control) => {
+    control.disabled = !hasDataset;
+  });
+  Array.from(elements.syntheticForm.elements).forEach((control) => {
+    control.disabled = !hasDataset;
+  });
+  Array.from(elements.searxngForm.elements).forEach((control) => {
+    control.disabled = !hasDataset;
+  });
+  Array.from(elements.webImportForm.elements).forEach((control) => {
+    control.disabled = !hasDataset;
+  });
+  Array.from(elements.githubForm.elements).forEach((control) => {
+    control.disabled = !hasDataset;
+  });
+  Array.from(elements.curationForm.elements).forEach((control) => {
+    control.disabled = !hasDataset;
+  });
+  Array.from(elements.exportForm.elements).forEach((control) => {
+    control.disabled = !hasDataset;
+  });
+  Array.from(elements.annotationForm.elements).forEach((control) => {
+    if (control.name !== "id") {
+      control.disabled = !hasExample;
+    }
+  });
+}
+
 function setDatasetForm(dataset) {
   field(elements.datasetForm, "name").value = dataset?.name || "";
   field(elements.datasetForm, "description").value = dataset?.description || "";
@@ -82,6 +171,10 @@ function setDatasetForm(dataset) {
 
 function renderDatasets() {
   elements.datasetList.innerHTML = "";
+  if (state.datasets.length === 0) {
+    elements.datasetList.innerHTML = '<div class="empty-state">No datasets yet. Create one to start collecting examples.</div>';
+    return;
+  }
   for (const dataset of state.datasets) {
     const button = document.createElement("button");
     button.className = `dataset-item ${state.selectedDataset?.id === dataset.id ? "active" : ""}`;
@@ -95,7 +188,27 @@ function renderDatasets() {
 
 function renderExamples() {
   elements.exampleTable.innerHTML = "";
-  for (const example of state.examples) {
+  const examples = filterExamples();
+
+  if (!state.selectedDataset) {
+    elements.exampleTable.innerHTML = '<div class="empty-state">Select a dataset to review examples.</div>';
+    return;
+  }
+
+  if (examples.length === 0) {
+    const message = state.examples.length === 0
+      ? "No examples yet. Add one manually or use an import tool above."
+      : "No examples match the current filter.";
+    elements.exampleTable.innerHTML = `<div class="empty-state">${message}</div>`;
+    return;
+  }
+
+  const visibleIds = new Set(examples.map((example) => example.id));
+  if (state.selectedExample && !visibleIds.has(state.selectedExample.id)) {
+    state.selectedExample = examples[0] || null;
+  }
+
+  for (const example of examples) {
     const row = document.createElement("button");
     row.className = `example-row ${state.selectedExample?.id === example.id ? "active" : ""}`;
     row.innerHTML = `<strong></strong><span></span>`;
@@ -112,10 +225,15 @@ function renderSummary() {
   elements.datasetDescription.textContent = dataset
     ? dataset.description || "No description provided."
     : "Use the controls on the left to create a dataset, import records, curate them, and export for training.";
+  elements.activeDatasetMeta.textContent = dataset
+    ? `${dataset.schema_name} schema • ${dataset.example_count} examples • ${dataset.token_total} tokens`
+    : "Create a dataset or select one to start working.";
+  elements.datasetSchemaBadge.textContent = dataset?.schema_name ? `${dataset.schema_name} schema` : "No schema";
   elements.statExamples.textContent = dataset?.example_count ?? 0;
   elements.statTokens.textContent = dataset?.token_total ?? 0;
   elements.statSchema.textContent = dataset?.schema_name ?? "-";
   setDatasetForm(dataset);
+  updateActionState();
 }
 
 function renderAnnotationForm() {
@@ -127,6 +245,7 @@ function renderAnnotationForm() {
   field(elements.annotationForm, "system_prompt").value = example?.system_prompt || "";
   field(elements.annotationForm, "labels").value = example?.labels?.join(", ") || "";
   field(elements.annotationForm, "status").value = example?.status || "draft";
+  updateActionState();
 }
 
 async function loadDatasets(preferredId = null) {
@@ -162,6 +281,24 @@ function selectExample(exampleId) {
   renderExamples();
   renderAnnotationForm();
 }
+
+elements.exampleSearch.addEventListener("input", (event) => {
+  state.exampleFilters.query = event.target.value;
+  renderExamples();
+  renderAnnotationForm();
+});
+
+elements.exampleStatusFilter.addEventListener("change", (event) => {
+  state.exampleFilters.status = event.target.value;
+  renderExamples();
+  renderAnnotationForm();
+});
+
+elements.workspaceTabs.forEach((button) => {
+  button.addEventListener("click", () => {
+    setActiveWorkspaceTab(button.dataset.tabTarget);
+  });
+});
 
 async function refreshDatasetState() {
   if (!state.selectedDataset) {
@@ -232,6 +369,7 @@ elements.manualExampleForm.addEventListener("submit", async (event) => {
       body: JSON.stringify(payload),
     });
     elements.manualExampleForm.reset();
+    setActiveWorkspaceTab("review");
     await refreshDatasetState();
   } catch (error) {
     alert(error.message);
@@ -251,6 +389,7 @@ elements.uploadForm.addEventListener("submit", async (event) => {
     });
     elements.curationResult.textContent = `Imported ${result.imported} examples.`;
     elements.uploadForm.reset();
+    setActiveWorkspaceTab("review");
     await refreshDatasetState();
   } catch (error) {
     alert(error.message);
@@ -271,6 +410,7 @@ elements.syntheticForm.addEventListener("submit", async (event) => {
       body: JSON.stringify(payload),
     });
     elements.curationResult.textContent = `Generated ${result.generated} examples.`;
+    setActiveWorkspaceTab("review");
     await refreshDatasetState();
   } catch (error) {
     alert(error.message);
@@ -371,6 +511,7 @@ elements.searxngForm.addEventListener("submit", async (event) => {
       body: JSON.stringify(payload),
     });
     elements.integrationResult.textContent = `Imported ${result.imported} records from SearxNG.`;
+    setActiveWorkspaceTab("review");
     await refreshDatasetState();
   } catch (error) {
     alert(error.message);
@@ -394,6 +535,7 @@ elements.webImportForm.addEventListener("submit", async (event) => {
       body: JSON.stringify(payload),
     });
     elements.integrationResult.textContent = `Imported ${result.imported} records from the web crawler.`;
+    setActiveWorkspaceTab("review");
     await refreshDatasetState();
   } catch (error) {
     alert(error.message);
@@ -419,10 +561,12 @@ elements.githubForm.addEventListener("submit", async (event) => {
       body: JSON.stringify(payload),
     });
     elements.integrationResult.textContent = `Imported ${result.imported} records from GitHub.`;
+    setActiveWorkspaceTab("review");
     await refreshDatasetState();
   } catch (error) {
     alert(error.message);
   }
 });
 
+setActiveWorkspaceTab(state.activeWorkspaceTab);
 loadDatasets();
