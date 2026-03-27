@@ -372,6 +372,12 @@ button:hover {
   gap: 10px;
 }
 
+#providerList,
+#fineTuneJobs {
+  max-height: 280px;
+  overflow: auto;
+}
+
 .dataset-item,
 .example-row {
   text-align: left;
@@ -411,6 +417,11 @@ button:hover {
   gap: 16px;
 }
 
+.annotation-editor-stack {
+  display: grid;
+  gap: 16px;
+}
+
 .notice {
   padding: 14px;
   color: var(--muted);
@@ -421,6 +432,10 @@ button:hover {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.align-end {
+  align-self: end;
 }
 
 .checkbox-field input {

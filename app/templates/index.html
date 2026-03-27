@@ -171,16 +171,37 @@
               </summary>
               <form id="syntheticForm" class="stacked-form tool-form">
                 <label>
+                  <span>Provider profile</span>
+                  <select name="provider_profile_id" data-provider-select>
+                    <option value="">Ad hoc request</option>
+                  </select>
+                </label>
+                <label>
                   <span>Provider</span>
                   <select name="provider">
-                    <option value="ollama">ollama</option>
-                    <option value="openai-compatible">openai-compatible</option>
+                    {% for provider_name in llm_provider_types %}
+                    <option value="{{ provider_name }}" {% if provider_name == 'ollama' %}selected{% endif %}>{{ provider_name }}</option>
+                    {% endfor %}
                   </select>
                 </label>
                 <label>
                   <span>Base URL</span>
                   <input name="base_url" value="{{ default_ollama_base_url }}">
                 </label>
+                <label>
+                  <span>API key</span>
+                  <input name="api_key" type="password" placeholder="Used for OpenAI or compatible APIs">
+                </label>
+                <div class="meta-row">
+                  <label>
+                    <span>Organization</span>
+                    <input name="organization" placeholder="Optional OpenAI organization">
+                  </label>
+                  <label>
+                    <span>Project</span>
+                    <input name="project" placeholder="Optional OpenAI project">
+                  </label>
+                </div>
                 <label>
                   <span>Model</span>
                   <input name="model" placeholder="llama3.2">
@@ -193,6 +214,10 @@
                   <label>
                     <span>Temperature</span>
                     <input name="temperature" type="number" min="0" max="2" step="0.1" value="0.7">
+                  </label>
+                  <label class="checkbox-field align-end">
+                    <input type="checkbox" name="verify_ssl" checked>
+                    <span>Verify SSL</span>
                   </label>
                 </div>
                 <label>
@@ -394,6 +419,98 @@
               </label>
               <button type="submit">Download export</button>
             </form>
+
+            <section class="utility-form stacked-form">
+              <div class="section-copy compact-copy">
+                <h4>LLM providers</h4>
+                <p>Save OpenAI, compatible API, or Ollama connection settings for generation and training jobs.</p>
+              </div>
+              <div id="providerList" class="dataset-list"></div>
+              <form id="providerForm" class="stacked-form">
+                <input type="hidden" name="id">
+                <label>
+                  <span>Name</span>
+                  <input name="name" placeholder="OpenAI production" required>
+                </label>
+                <label>
+                  <span>Provider type</span>
+                  <select name="provider_type">
+                    {% for provider_name in llm_provider_types %}
+                    <option value="{{ provider_name }}">{{ provider_name }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+                <label>
+                  <span>Base URL</span>
+                  <input name="base_url" value="{{ default_openai_base_url }}" required>
+                </label>
+                <label>
+                  <span>Default model</span>
+                  <input name="default_model" placeholder="gpt-4.1-mini or hosted compatible model">
+                </label>
+                <label>
+                  <span>API key</span>
+                  <input name="api_key" type="password" placeholder="Leave blank on update to keep the stored key">
+                </label>
+                <div class="meta-row">
+                  <label>
+                    <span>Organization</span>
+                    <input name="organization" placeholder="Optional">
+                  </label>
+                  <label>
+                    <span>Project</span>
+                    <input name="project" placeholder="Optional">
+                  </label>
+                </div>
+                <label class="checkbox-field">
+                  <input type="checkbox" name="verify_ssl" checked>
+                  <span>Verify HTTPS certificates</span>
+                </label>
+                <div class="form-actions">
+                  <button type="submit">Save provider</button>
+                  <button type="button" id="providerResetButton" class="ghost-button">Clear form</button>
+                  <button type="button" id="providerModelsButton" class="ghost-button">List models</button>
+                  <button type="button" id="providerDeleteButton" class="danger-button">Delete provider</button>
+                </div>
+              </form>
+              <div id="providerResult" class="notice">No provider operations run yet.</div>
+            </section>
+
+            <section class="utility-form stacked-form">
+              <div class="section-copy compact-copy">
+                <h4>Fine-tuning</h4>
+                <p>Export the selected dataset as OpenAI chat JSONL, upload it, and start a fine-tune job from the app.</p>
+              </div>
+              <form id="fineTuneForm" class="stacked-form">
+                <label>
+                  <span>Provider profile</span>
+                  <select name="provider_profile_id" data-provider-select required>
+                    <option value="">Select a saved provider</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Base model</span>
+                  <input name="base_model" placeholder="gpt-4.1-mini-2025-04-14">
+                </label>
+                <div class="meta-row">
+                  <label>
+                    <span>Suffix</span>
+                    <input name="suffix" maxlength="40" placeholder="support-faq">
+                  </label>
+                  <label>
+                    <span>Epochs</span>
+                    <input name="n_epochs" type="number" min="1" max="25" placeholder="Optional">
+                  </label>
+                </div>
+                <div class="form-actions">
+                  <button type="submit">Start fine-tune</button>
+                  <button type="button" id="syncFineTuneJobsButton" class="ghost-button">Sync jobs</button>
+                  <button type="button" id="cancelFineTuneJobButton" class="danger-button">Cancel selected</button>
+                </div>
+              </form>
+              <div id="fineTuneJobs" class="example-table"></div>
+              <div id="fineTuneResult" class="notice">No fine-tune jobs yet.</div>
+            </section>
           </div>
             <div id="curationResult" class="notice">No curation run yet.</div>
           </section>
@@ -425,41 +542,76 @@
             <div class="review-list-panel">
               <div id="exampleTable" class="example-table"></div>
             </div>
-            <form id="annotationForm" class="stacked-form">
-              <input type="hidden" name="id">
-              <label>
-                <span>Instruction</span>
-                <textarea name="instruction" rows="4"></textarea>
-              </label>
-              <label>
-                <span>Input / Context</span>
-                <textarea name="input_text" rows="4"></textarea>
-              </label>
-              <label>
-                <span>Output</span>
-                <textarea name="output_text" rows="4"></textarea>
-              </label>
-              <label>
-                <span>System Prompt</span>
-                <textarea name="system_prompt" rows="3"></textarea>
-              </label>
-              <label>
-                <span>Labels</span>
-                <input name="labels">
-              </label>
-              <label>
-                <span>Status</span>
-                <select name="status">
-                  <option value="draft">draft</option>
-                  <option value="reviewed">reviewed</option>
-                  <option value="approved">approved</option>
-                </select>
-              </label>
-              <div class="form-actions">
-                <button type="submit">Save changes</button>
-                <button type="button" id="deleteExampleButton" class="danger-button">Delete example</button>
-              </div>
-            </form>
+            <div class="annotation-editor-stack">
+              <form id="annotationForm" class="stacked-form">
+                <input type="hidden" name="id">
+                <label>
+                  <span>Instruction</span>
+                  <textarea name="instruction" rows="4"></textarea>
+                </label>
+                <label>
+                  <span>Input / Context</span>
+                  <textarea name="input_text" rows="4"></textarea>
+                </label>
+                <label>
+                  <span>Output</span>
+                  <textarea name="output_text" rows="4"></textarea>
+                </label>
+                <label>
+                  <span>System Prompt</span>
+                  <textarea name="system_prompt" rows="3"></textarea>
+                </label>
+                <label>
+                  <span>Labels</span>
+                  <input name="labels">
+                </label>
+                <label>
+                  <span>Status</span>
+                  <select name="status">
+                    <option value="draft">draft</option>
+                    <option value="reviewed">reviewed</option>
+                    <option value="approved">approved</option>
+                  </select>
+                </label>
+                <div class="form-actions">
+                  <button type="submit">Save changes</button>
+                  <button type="button" id="deleteExampleButton" class="danger-button">Delete example</button>
+                </div>
+              </form>
+
+              <form id="assistForm" class="stacked-form utility-form">
+                <h4>LLM assist</h4>
+                <label>
+                  <span>Provider profile</span>
+                  <select name="provider_profile_id" data-provider-select required>
+                    <option value="">Select a saved provider</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Model override</span>
+                  <input name="model" placeholder="Uses the provider default model when blank">
+                </label>
+                <div class="meta-row">
+                  <label>
+                    <span>Action</span>
+                    <select name="action">
+                      <option value="improve-example">Improve example</option>
+                      <option value="draft-output">Draft missing output</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Temperature</span>
+                    <input name="temperature" type="number" min="0" max="2" step="0.1" value="0.4">
+                  </label>
+                </div>
+                <label>
+                  <span>Guidance</span>
+                  <textarea name="instructions" rows="3" placeholder="Tighten tone, remove fluff, and keep outputs grounded in the provided context."></textarea>
+                </label>
+                <button type="submit">Apply assist to selected example</button>
+              </form>
+              <div id="assistResult" class="notice">No assist run yet.</div>
+            </div>
           </div>
           </section>
         </div>

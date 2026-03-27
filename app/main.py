@@ -2,6 +2,7 @@ import json
 import os
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -15,7 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import engine, get_db
-from app.models import Base, Dataset, Example
+from app.models import Base, Dataset, Example, FineTuneJob, ProviderProfile
 from app.services.datasets import (
     SUPPORTED_EXPORTS,
     SUPPORTED_SCHEMAS,
@@ -26,13 +27,27 @@ from app.services.datasets import (
     safe_json_loads,
 )
 from app.services.discovery import SUPPORTED_GITHUB_SEARCH_TYPES, import_from_github, import_from_searxng, import_from_web
-from app.services.llm import generate_examples
+from app.services.llm import (
+    FINE_TUNE_CAPABLE_PROVIDERS,
+    SUPPORTED_LLM_PROVIDERS,
+    LLMConfig,
+    assist_example,
+    cancel_fine_tuning_job,
+    create_fine_tuning_job,
+    generate_examples,
+    get_fine_tuning_job,
+    list_models,
+    validate_provider,
+    upload_training_file,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 DEFAULT_OLLAMA_BASE_URL = os.getenv("FORGETUNE_OLLAMA_BASE_URL", "http://host.docker.internal:11434")
+DEFAULT_OPENAI_BASE_URL = os.getenv("FORGETUNE_OPENAI_BASE_URL", "https://api.openai.com")
+DEFAULT_OPENAI_API_KEY = os.getenv("FORGETUNE_OPENAI_API_KEY", "")
 DEFAULT_SEARXNG_BASE_URL = os.getenv("FORGETUNE_SEARXNG_BASE_URL", "http://host.docker.internal:8080")
 CRAWLER_SERVICE_URL = os.getenv("FORGETUNE_CRAWLER_SERVICE_URL", "").rstrip("/")
 
@@ -81,12 +96,54 @@ class CurationRequest(BaseModel):
 
 
 class SyntheticRequest(BaseModel):
+    provider_profile_id: int | None = None
     provider: str = Field(default="ollama")
     base_url: str = Field(default=DEFAULT_OLLAMA_BASE_URL)
-    model: str
+    api_key: str | None = None
+    organization: str = ""
+    project: str = ""
+    verify_ssl: bool | None = None
+    model: str = ""
     prompt: str
     count: int = Field(default=5, ge=1, le=100)
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+
+
+class ProviderProfileCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    provider_type: str = Field(default="openai-compatible")
+    base_url: str = Field(min_length=1)
+    default_model: str = ""
+    api_key: str | None = None
+    organization: str = ""
+    project: str = ""
+    verify_ssl: bool = True
+
+
+class ProviderProfileUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    provider_type: str = Field(default="openai-compatible")
+    base_url: str = Field(min_length=1)
+    default_model: str = ""
+    api_key: str | None = None
+    organization: str = ""
+    project: str = ""
+    verify_ssl: bool = True
+
+
+class AssistRequest(BaseModel):
+    provider_profile_id: int
+    model: str = ""
+    action: str = Field(default="improve-example")
+    instructions: str = ""
+    temperature: float = Field(default=0.4, ge=0.0, le=2.0)
+
+
+class FineTuneCreateRequest(BaseModel):
+    provider_profile_id: int
+    base_model: str = ""
+    suffix: str = Field(default="", max_length=40)
+    n_epochs: int | None = Field(default=None, ge=1, le=25)
 
 
 class ExternalImportRequest(BaseModel):
@@ -144,6 +201,62 @@ class DatasetSummary:
     updated_at: str
 
 
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def mask_secret(value: str) -> str:
+    cleaned = (value or "").strip()
+    if not cleaned:
+        return ""
+    if len(cleaned) <= 8:
+        return "*" * len(cleaned)
+    return f"{cleaned[:4]}...{cleaned[-4:]}"
+
+
+def serialize_provider_profile(profile: ProviderProfile) -> dict[str, Any]:
+    return {
+        "id": profile.id,
+        "name": profile.name,
+        "provider_type": profile.provider_type,
+        "base_url": profile.base_url,
+        "default_model": profile.default_model,
+        "organization": profile.organization,
+        "project": profile.project,
+        "verify_ssl": profile.verify_ssl,
+        "metadata": safe_json_loads(profile.metadata_json, {}),
+        "has_api_key": bool(profile.api_key),
+        "masked_api_key": mask_secret(profile.api_key),
+        "created_at": profile.created_at.isoformat(),
+        "updated_at": profile.updated_at.isoformat(),
+    }
+
+
+def serialize_fine_tune_job(job: FineTuneJob) -> dict[str, Any]:
+    return {
+        "id": job.id,
+        "dataset_id": job.dataset_id,
+        "provider_profile_id": job.provider_profile_id,
+        "provider_name": job.provider_profile.name if job.provider_profile else "",
+        "provider_type": job.provider_profile.provider_type if job.provider_profile else "",
+        "remote_job_id": job.remote_job_id,
+        "remote_file_id": job.remote_file_id,
+        "base_model": job.base_model,
+        "fine_tuned_model": job.fine_tuned_model,
+        "suffix": job.suffix,
+        "status": job.status,
+        "training_format": job.training_format,
+        "training_filename": job.training_filename,
+        "hyperparameters": safe_json_loads(job.hyperparameters_json, {}),
+        "remote_response": safe_json_loads(job.remote_response_json, {}),
+        "error": safe_json_loads(job.error_json, {}),
+        "launched_at": job.launched_at.isoformat() if job.launched_at else None,
+        "finished_at": job.finished_at.isoformat() if job.finished_at else None,
+        "created_at": job.created_at.isoformat(),
+        "updated_at": job.updated_at.isoformat(),
+    }
+
+
 def serialize_example(example: Example) -> dict[str, Any]:
     return {
         "id": example.id,
@@ -161,6 +274,91 @@ def serialize_example(example: Example) -> dict[str, Any]:
         "created_at": example.created_at.isoformat(),
         "updated_at": example.updated_at.isoformat(),
     }
+
+
+def provider_profile_or_404(db: Session, provider_profile_id: int) -> ProviderProfile:
+    profile = db.get(ProviderProfile, provider_profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Provider profile not found")
+    return profile
+
+
+def fine_tune_job_or_404(db: Session, fine_tune_job_id: int) -> FineTuneJob:
+    job = db.get(FineTuneJob, fine_tune_job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Fine-tune job not found")
+    return job
+
+
+def resolve_runtime_config(
+    db: Session,
+    provider_profile_id: int | None,
+    provider: str,
+    base_url: str,
+    model: str,
+    api_key: str | None,
+    organization: str,
+    project: str,
+    verify_ssl: bool | None,
+) -> tuple[LLMConfig, ProviderProfile | None]:
+    profile: ProviderProfile | None = None
+    if provider_profile_id is not None:
+        profile = provider_profile_or_404(db, provider_profile_id)
+        provider = profile.provider_type
+        base_url = profile.base_url
+        api_key = api_key if api_key else profile.api_key
+        organization = organization or profile.organization
+        project = project or profile.project
+        verify_ssl = profile.verify_ssl if verify_ssl is None else verify_ssl
+        model = model or profile.default_model
+
+    provider = validate_provider(provider)
+    if provider == "openai" and not base_url:
+        base_url = DEFAULT_OPENAI_BASE_URL
+    if provider == "openai" and not api_key:
+        api_key = DEFAULT_OPENAI_API_KEY
+    if provider == "ollama" and not base_url:
+        base_url = DEFAULT_OLLAMA_BASE_URL
+    if not model:
+        raise HTTPException(status_code=400, detail="Model is required")
+    try:
+        config = LLMConfig(
+            provider=provider,
+            base_url=base_url,
+            model=model,
+            api_key=(api_key or "").strip(),
+            organization=organization.strip(),
+            project=project.strip(),
+            verify_ssl=verify_ssl,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return config, profile
+
+
+def provider_profile_to_config(profile: ProviderProfile, model: str = "") -> LLMConfig:
+    api_key = profile.api_key
+    if profile.provider_type == "openai" and not api_key:
+        api_key = DEFAULT_OPENAI_API_KEY
+    return LLMConfig(
+        provider=profile.provider_type,
+        base_url=profile.base_url,
+        model=model or profile.default_model,
+        api_key=api_key,
+        organization=profile.organization,
+        project=profile.project,
+        verify_ssl=profile.verify_ssl,
+    )
+
+
+def update_fine_tune_job_from_remote(job: FineTuneJob, payload: dict[str, Any]) -> None:
+    job.status = payload.get("status") or job.status
+    job.fine_tuned_model = payload.get("fine_tuned_model") or job.fine_tuned_model
+    job.remote_response_json = json.dumps(payload)
+    job.error_json = json.dumps(payload.get("error") or {})
+    finished_at = payload.get("finished_at")
+    if finished_at:
+        job.finished_at = datetime.utcfromtimestamp(finished_at)
 
 
 def summarize_dataset(db: Session, dataset: Dataset) -> DatasetSummary:
@@ -281,7 +479,9 @@ async def index(request: Request) -> HTMLResponse:
             "schemas": SUPPORTED_SCHEMAS,
             "exports": SUPPORTED_EXPORTS,
             "github_search_types": SUPPORTED_GITHUB_SEARCH_TYPES,
+            "llm_provider_types": sorted(SUPPORTED_LLM_PROVIDERS),
             "default_ollama_base_url": DEFAULT_OLLAMA_BASE_URL,
+            "default_openai_base_url": DEFAULT_OPENAI_BASE_URL,
             "default_searxng_base_url": DEFAULT_SEARXNG_BASE_URL,
         },
     )
@@ -290,6 +490,98 @@ async def index(request: Request) -> HTMLResponse:
 @app.get("/api/health")
 async def healthcheck() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/providers")
+async def list_provider_profiles(db: Annotated[Session, Depends(get_db)]) -> list[dict[str, Any]]:
+    profiles = db.execute(select(ProviderProfile).order_by(ProviderProfile.updated_at.desc())).scalars().all()
+    return [serialize_provider_profile(profile) for profile in profiles]
+
+
+@app.post("/api/providers")
+async def create_provider_profile(
+    payload: ProviderProfileCreate,
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, Any]:
+    provider_type = validate_provider(payload.provider_type)
+    profile = ProviderProfile(
+        name=payload.name.strip(),
+        provider_type=provider_type,
+        base_url=payload.base_url.strip(),
+        default_model=payload.default_model.strip(),
+        api_key=(payload.api_key or "").strip(),
+        organization=payload.organization.strip(),
+        project=payload.project.strip(),
+        verify_ssl=payload.verify_ssl,
+    )
+    db.add(profile)
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Failed to create provider profile: {exc}") from exc
+    db.refresh(profile)
+    return serialize_provider_profile(profile)
+
+
+@app.get("/api/providers/{provider_profile_id}")
+async def get_provider_profile(
+    provider_profile_id: int,
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, Any]:
+    profile = provider_profile_or_404(db, provider_profile_id)
+    return serialize_provider_profile(profile)
+
+
+@app.put("/api/providers/{provider_profile_id}")
+async def update_provider_profile(
+    provider_profile_id: int,
+    payload: ProviderProfileUpdate,
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, Any]:
+    profile = provider_profile_or_404(db, provider_profile_id)
+    profile.name = payload.name.strip()
+    profile.provider_type = validate_provider(payload.provider_type)
+    profile.base_url = payload.base_url.strip()
+    profile.default_model = payload.default_model.strip()
+    if payload.api_key is not None and payload.api_key.strip():
+        profile.api_key = payload.api_key.strip()
+    profile.organization = payload.organization.strip()
+    profile.project = payload.project.strip()
+    profile.verify_ssl = payload.verify_ssl
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Failed to update provider profile: {exc}") from exc
+    db.refresh(profile)
+    return serialize_provider_profile(profile)
+
+
+@app.delete("/api/providers/{provider_profile_id}")
+async def delete_provider_profile(
+    provider_profile_id: int,
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, str]:
+    profile = provider_profile_or_404(db, provider_profile_id)
+    if profile.fine_tune_jobs:
+        raise HTTPException(status_code=400, detail="Delete linked fine-tune jobs before removing this provider profile")
+    db.delete(profile)
+    db.commit()
+    return {"status": "deleted"}
+
+
+@app.get("/api/providers/{provider_profile_id}/models")
+async def list_provider_models(
+    provider_profile_id: int,
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, Any]:
+    profile = provider_profile_or_404(db, provider_profile_id)
+    try:
+        models = await list_models(provider_profile_to_config(profile))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Model listing failed: {exc}") from exc
+    return {"models": models}
 
 
 @app.post("/internal/acquisition/searxng")
@@ -422,12 +714,205 @@ async def update_example(
     return serialize_example(example)
 
 
+@app.post("/api/examples/{example_id}/assist")
+async def assist_with_example(
+    example_id: int,
+    payload: AssistRequest,
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, Any]:
+    example = example_or_404(db, example_id)
+    dataset = dataset_or_404(db, example.dataset_id)
+    try:
+        config, profile = resolve_runtime_config(
+            db,
+            provider_profile_id=payload.provider_profile_id,
+            provider="openai-compatible",
+            base_url="",
+            model=payload.model,
+            api_key=None,
+            organization="",
+            project="",
+            verify_ssl=True,
+        )
+        assisted = await assist_example(
+            config=config,
+            dataset_name=dataset.name,
+            dataset_description=dataset.description,
+            example=serialize_example(example),
+            action=payload.action,
+            instructions=payload.instructions,
+            temperature=payload.temperature,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"LLM assist failed: {exc}") from exc
+
+    normalized = canonicalize_record(
+        {
+            "instruction": assisted.get("instruction") or example.instruction,
+            "input_text": assisted.get("input") or assisted.get("input_text") or example.input_text,
+            "output_text": assisted.get("output") or assisted.get("output_text") or example.output_text,
+            "system_prompt": assisted.get("system_prompt") or example.system_prompt,
+            "metadata": {
+                **safe_json_loads(example.metadata_json, {}),
+                "assisted_by_provider": config.provider,
+                "assisted_by_model": config.model,
+                "assisted_by_profile": profile.name if profile else None,
+                "assist_action": payload.action,
+            },
+            "labels": assisted.get("labels") or safe_json_loads(example.labels_json, []),
+            "status": assisted.get("status") or example.status,
+            "conversation": safe_json_loads(example.conversation_json, []),
+        }
+    )
+    upsert_example_fields(example, normalized)
+    db.commit()
+    db.refresh(example)
+    return serialize_example(example)
+
+
 @app.delete("/api/examples/{example_id}")
 async def delete_example(example_id: int, db: Annotated[Session, Depends(get_db)]) -> dict[str, str]:
     example = example_or_404(db, example_id)
     db.delete(example)
     db.commit()
     return {"status": "deleted"}
+
+
+@app.get("/api/datasets/{dataset_id}/fine-tunes")
+async def list_dataset_fine_tunes(
+    dataset_id: int,
+    db: Annotated[Session, Depends(get_db)],
+) -> list[dict[str, Any]]:
+    dataset_or_404(db, dataset_id)
+    jobs = db.execute(
+        select(FineTuneJob)
+        .options(selectinload(FineTuneJob.provider_profile))
+        .where(FineTuneJob.dataset_id == dataset_id)
+        .order_by(FineTuneJob.updated_at.desc())
+    ).scalars().all()
+    return [serialize_fine_tune_job(job) for job in jobs]
+
+
+@app.post("/api/datasets/{dataset_id}/fine-tunes")
+async def create_dataset_fine_tune(
+    dataset_id: int,
+    payload: FineTuneCreateRequest,
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, Any]:
+    dataset = dataset_or_404(db, dataset_id)
+    profile = provider_profile_or_404(db, payload.provider_profile_id)
+    if profile.provider_type not in FINE_TUNE_CAPABLE_PROVIDERS:
+        raise HTTPException(status_code=400, detail="Selected provider does not support OpenAI-compatible fine-tuning")
+
+    base_model = payload.base_model.strip() or profile.default_model.strip()
+    if not base_model:
+        raise HTTPException(status_code=400, detail="Base model is required")
+
+    examples = db.execute(
+        select(Example)
+        .where(Example.dataset_id == dataset_id)
+        .order_by(Example.created_at.asc())
+    ).scalars().all()
+    if not examples:
+        raise HTTPException(status_code=400, detail="Dataset has no examples to fine-tune on")
+
+    records = [serialize_example(example) for example in examples]
+    _, training_bytes, extension = export_records(records, "openai")
+    training_filename = f"{dataset.name.replace(' ', '_').lower()}_train.{extension}"
+    config = provider_profile_to_config(profile, base_model)
+
+    request_payload: dict[str, Any] = {
+        "training_file": "",
+        "model": base_model,
+    }
+    if payload.suffix.strip():
+        request_payload["suffix"] = payload.suffix.strip()
+    if payload.n_epochs is not None:
+        request_payload["hyperparameters"] = {"n_epochs": payload.n_epochs}
+
+    try:
+        uploaded = await upload_training_file(config, training_filename, training_bytes)
+        request_payload["training_file"] = uploaded.get("id", "")
+        remote_job = await create_fine_tuning_job(config, request_payload)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Fine-tune creation failed: {exc}") from exc
+    if not request_payload["training_file"]:
+        raise HTTPException(status_code=400, detail="Provider did not return a training file ID")
+    if not remote_job.get("id"):
+        raise HTTPException(status_code=400, detail="Provider did not return a fine-tune job ID")
+
+    job = FineTuneJob(
+        dataset_id=dataset_id,
+        provider_profile_id=profile.id,
+        remote_job_id=remote_job.get("id", ""),
+        remote_file_id=uploaded.get("id", ""),
+        base_model=base_model,
+        fine_tuned_model=remote_job.get("fine_tuned_model") or "",
+        suffix=payload.suffix.strip(),
+        status=remote_job.get("status") or "queued",
+        training_format="openai",
+        training_filename=training_filename,
+        hyperparameters_json=json.dumps(request_payload.get("hyperparameters") or {}),
+        remote_response_json=json.dumps(remote_job),
+        error_json=json.dumps(remote_job.get("error") or {}),
+        launched_at=utcnow(),
+    )
+    update_fine_tune_job_from_remote(job, remote_job)
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    db.refresh(profile)
+    return serialize_fine_tune_job(job)
+
+
+@app.post("/api/fine-tunes/{fine_tune_job_id}/sync")
+async def sync_fine_tune_job(
+    fine_tune_job_id: int,
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, Any]:
+    job = db.execute(
+        select(FineTuneJob)
+        .options(selectinload(FineTuneJob.provider_profile))
+        .where(FineTuneJob.id == fine_tune_job_id)
+    ).scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Fine-tune job not found")
+
+    profile = job.provider_profile
+    config = provider_profile_to_config(profile, job.base_model)
+    try:
+        remote = await get_fine_tuning_job(config, job.remote_job_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Fine-tune sync failed: {exc}") from exc
+    update_fine_tune_job_from_remote(job, remote)
+    db.commit()
+    db.refresh(job)
+    return serialize_fine_tune_job(job)
+
+
+@app.post("/api/fine-tunes/{fine_tune_job_id}/cancel")
+async def cancel_dataset_fine_tune(
+    fine_tune_job_id: int,
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, Any]:
+    job = db.execute(
+        select(FineTuneJob)
+        .options(selectinload(FineTuneJob.provider_profile))
+        .where(FineTuneJob.id == fine_tune_job_id)
+    ).scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Fine-tune job not found")
+
+    profile = job.provider_profile
+    config = provider_profile_to_config(profile, job.base_model)
+    try:
+        remote = await cancel_fine_tuning_job(config, job.remote_job_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Fine-tune cancel failed: {exc}") from exc
+    update_fine_tune_job_from_remote(job, remote)
+    db.commit()
+    db.refresh(job)
+    return serialize_fine_tune_job(job)
 
 
 @app.post("/api/datasets/{dataset_id}/import")
@@ -457,14 +942,20 @@ async def synthetic_examples(
     db: Annotated[Session, Depends(get_db)],
 ) -> dict[str, Any]:
     dataset_or_404(db, dataset_id)
-    if payload.provider not in {"ollama", "openai-compatible"}:
-        raise HTTPException(status_code=400, detail="Unsupported provider")
-
     try:
-        content = await generate_examples(
+        config, profile = resolve_runtime_config(
+            db,
+            provider_profile_id=payload.provider_profile_id,
             provider=payload.provider,
             base_url=payload.base_url,
             model=payload.model,
+            api_key=payload.api_key,
+            organization=payload.organization,
+            project=payload.project,
+            verify_ssl=payload.verify_ssl,
+        )
+        content = await generate_examples(
+            config=config,
             prompt=payload.prompt,
             count=payload.count,
             temperature=payload.temperature,
@@ -472,6 +963,13 @@ async def synthetic_examples(
         parsed = parse_generated_payload(content)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Synthetic generation failed: {exc}") from exc
+    for item in parsed:
+        item["metadata"] = {
+            **(item.get("metadata") or {}),
+            "generation_provider": config.provider,
+            "generation_model": config.model,
+            "provider_profile": profile.name if profile else None,
+        }
 
     added = add_examples(db, dataset_id, parsed)
     return {"status": "ok", "generated": added}

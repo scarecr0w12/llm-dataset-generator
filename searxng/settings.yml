@@ -12,6 +12,9 @@ search:
   safe_search: 1
   autocomplete: ""
   default_lang: "all"
+  formats:
+    - html
+    - json
 
 ui:
   static_use_hash: true
