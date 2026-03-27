@@ -1,4 +1,4 @@
 /data/dataset_manager.db
 /app/__pycache__/
-/app/service/__pycache__/
+/app/services/__pycache__/
 /.venv/
