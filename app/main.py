@@ -90,6 +90,7 @@ class ExternalImportRequest(BaseModel):
     status: str = Field(default="draft")
     tokenizer_name: str = Field(default="cl100k_base")
     max_chars: int = Field(default=6000, ge=500, le=50000)
+    verify_ssl: bool = True
 
 
 class SearxngImportRequest(ExternalImportRequest):
@@ -441,6 +442,7 @@ async def import_web_source(
             labels=payload.labels,
             status=payload.status,
             tokenizer_name=payload.tokenizer_name,
+            verify_ssl=payload.verify_ssl,
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Web import failed: {exc}") from exc

@@ -204,6 +204,10 @@
                 <input type="checkbox" name="crawl_pages">
                 <span>Fetch result pages for full text</span>
               </label>
+              <label class="checkbox-field">
+                <input type="checkbox" name="verify_ssl" checked>
+                <span>Verify HTTPS certificates</span>
+              </label>
               <button type="submit">Import search results</button>
             </form>
 
@@ -240,6 +244,10 @@
               <label class="checkbox-field">
                 <input type="checkbox" name="same_domain_only" checked>
                 <span>Stay on the same domain</span>
+              </label>
+              <label class="checkbox-field">
+                <input type="checkbox" name="verify_ssl" checked>
+                <span>Verify HTTPS certificates</span>
               </label>
               <button type="submit">Crawl and import</button>
             </form>
@@ -285,6 +293,10 @@
               <label class="checkbox-field">
                 <input type="checkbox" name="include_readme" checked>
                 <span>Include repository README when available</span>
+              </label>
+              <label class="checkbox-field">
+                <input type="checkbox" name="verify_ssl" checked>
+                <span>Verify HTTPS certificates</span>
               </label>
               <button type="submit">Import GitHub results</button>
             </form>

@@ -363,6 +363,7 @@ elements.searxngForm.addEventListener("submit", async (event) => {
   payload.limit = Number(payload.limit || 5);
   payload.safesearch = 1;
   payload.crawl_pages = field(elements.searxngForm, "crawl_pages").checked;
+  payload.verify_ssl = field(elements.searxngForm, "verify_ssl").checked;
   payload.labels = parseLabels(payload.labels);
   try {
     const result = await request(`/api/datasets/${state.selectedDataset.id}/sources/searxng`, {
@@ -385,6 +386,7 @@ elements.webImportForm.addEventListener("submit", async (event) => {
   payload.max_pages = Number(payload.max_pages || 5);
   payload.max_depth = Number(payload.max_depth || 1);
   payload.same_domain_only = field(elements.webImportForm, "same_domain_only").checked;
+  payload.verify_ssl = field(elements.webImportForm, "verify_ssl").checked;
   payload.labels = parseLabels(payload.labels);
   try {
     const result = await request(`/api/datasets/${state.selectedDataset.id}/sources/web`, {
@@ -406,6 +408,7 @@ elements.githubForm.addEventListener("submit", async (event) => {
   const payload = formToJson(elements.githubForm);
   payload.limit = Number(payload.limit || 5);
   payload.include_readme = field(elements.githubForm, "include_readme").checked;
+  payload.verify_ssl = field(elements.githubForm, "verify_ssl").checked;
   payload.labels = parseLabels(payload.labels);
   if (!payload.token) {
     delete payload.token;

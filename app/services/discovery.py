@@ -25,6 +25,15 @@ class SourceDocument:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+def build_http_client(*, verify_ssl: bool, headers: dict[str, str] | None = None, timeout: float = 30.0) -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        follow_redirects=True,
+        headers=headers,
+        timeout=timeout,
+        verify=verify_ssl,
+    )
+
+
 def clip_text(value: str, max_chars: int) -> str:
     cleaned = normalize_text(value)
     if len(cleaned) <= max_chars:
@@ -115,12 +124,16 @@ def derive_title_from_url(url: str) -> str:
     return slug or parsed.netloc
 
 
-async def fetch_document(client: httpx.AsyncClient, url: str, max_chars: int) -> tuple[SourceDocument | None, list[str]]:
+async def fetch_document(
+    client: httpx.AsyncClient,
+    url: str,
+    max_chars: int,
+) -> tuple[SourceDocument | None, list[str], str | None]:
     try:
         response = await client.get(url)
         response.raise_for_status()
-    except httpx.HTTPError:
-        return None, []
+    except httpx.HTTPError as exc:
+        return None, [], str(exc)
 
     resolved_url = str(response.url)
     content_type = response.headers.get("content-type", "").lower()
@@ -148,6 +161,7 @@ async def fetch_document(client: httpx.AsyncClient, url: str, max_chars: int) ->
                 metadata={"content_type": content_type or "text/html"},
             ),
             links,
+            None,
         )
 
     if any(token in content_type for token in ["text/", "json", "xml", "javascript"]):
@@ -163,9 +177,10 @@ async def fetch_document(client: httpx.AsyncClient, url: str, max_chars: int) ->
                 metadata={"content_type": content_type or "text/plain"},
             ),
             [],
+            None,
         )
 
-    return None, []
+    return None, [], f"Unsupported content type for {resolved_url or url}: {content_type or 'unknown'}"
 
 
 async def import_from_web(
@@ -182,6 +197,7 @@ async def import_from_web(
     labels: list[str],
     status: str,
     tokenizer_name: str,
+    verify_ssl: bool,
 ) -> list[dict[str, Any]]:
     seeds = [normalize_http_url(url) for url in urls if normalize_http_url(url)]
     if not seeds:
@@ -190,9 +206,10 @@ async def import_from_web(
     include_filters = split_patterns(include_patterns)
     exclude_filters = split_patterns(exclude_patterns)
     documents: list[SourceDocument] = []
+    failures: list[str] = []
 
-    async with httpx.AsyncClient(
-        follow_redirects=True,
+    async with build_http_client(
+        verify_ssl=verify_ssl,
         headers={"User-Agent": DEFAULT_USER_AGENT},
         timeout=30.0,
     ) as client:
@@ -212,9 +229,11 @@ async def import_from_web(
                 if include_filters and current_url != seed and not any(pattern in current_url for pattern in include_filters):
                     continue
 
-                document, links = await fetch_document(client, current_url, max_chars)
+                document, links, error = await fetch_document(client, current_url, max_chars)
                 if document and document.content:
                     documents.append(document)
+                elif error:
+                    failures.append(f"{current_url}: {error}")
 
                 if depth >= max_depth:
                     continue
@@ -229,7 +248,8 @@ async def import_from_web(
                     break
 
     if not documents:
-        raise ValueError("No crawlable content was found from the supplied URLs")
+        detail = failures[-1] if failures else "No reachable documents matched the crawl filters"
+        raise ValueError(f"No crawlable content was found from the supplied URLs. {detail}")
 
     return build_examples_from_documents(
         documents=documents,
@@ -258,6 +278,7 @@ async def import_from_searxng(
     labels: list[str],
     status: str,
     tokenizer_name: str,
+    verify_ssl: bool,
 ) -> list[dict[str, Any]]:
     params = {
         "q": query,
@@ -270,8 +291,8 @@ async def import_from_searxng(
     }
     params = {key: value for key, value in params.items() if value not in {"", None}}
 
-    async with httpx.AsyncClient(
-        follow_redirects=True,
+    async with build_http_client(
+        verify_ssl=verify_ssl,
         headers={"User-Agent": DEFAULT_USER_AGENT},
         timeout=30.0,
     ) as client:
@@ -286,7 +307,7 @@ async def import_from_searxng(
             snippet = clip_text(result.get("content") or "", min(max_chars, 320))
 
             if crawl_pages and target_url:
-                crawled, _ = await fetch_document(client, target_url, max_chars)
+                crawled, _, _ = await fetch_document(client, target_url, max_chars)
                 if crawled and crawled.content:
                     crawled.source_type = "searxng"
                     crawled.metadata.update(
@@ -364,6 +385,7 @@ async def import_from_github(
     labels: list[str],
     status: str,
     tokenizer_name: str,
+    verify_ssl: bool,
 ) -> list[dict[str, Any]]:
     if search_type not in SUPPORTED_GITHUB_SEARCH_TYPES:
         raise ValueError(f"Unsupported GitHub search type: {search_type}")
@@ -387,7 +409,7 @@ async def import_from_github(
     }
     params = {key: value for key, value in params.items() if value not in {"", None}}
 
-    async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
+    async with build_http_client(verify_ssl=verify_ssl, headers=headers, timeout=30.0) as client:
         response = await client.get(f"{base_url.rstrip('/')}/search/{search_type}", params=params)
         response.raise_for_status()
         items = (response.json().get("items") or [])[:limit]

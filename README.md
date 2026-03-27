@@ -38,6 +38,7 @@ uvicorn app.main:app --reload
 - SearxNG: point the base URL at your instance, for example `http://host.docker.internal:8080`, and optionally fetch full result pages instead of snippets only.
 - Web crawl: seed one or more URLs, keep the crawl same-domain by default, and import the extracted page text as draft examples for later annotation.
 - GitHub: search repositories, code, or issues via the GitHub REST API. Add a personal access token if you need higher rate limits or private-resource access.
+- If an internal service or intercepted network path presents a non-standard TLS certificate, you can disable HTTPS verification for that specific import from the UI. Leave verification enabled for normal public endpoints.
 
 ## Notes
 
