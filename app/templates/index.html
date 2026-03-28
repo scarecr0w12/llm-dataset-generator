@@ -446,7 +446,7 @@
                 </label>
                 <label>
                   <span>Default model</span>
-                  <input name="default_model" value="{{ default_openai_model }}" placeholder="gpt-4.1-mini or hosted compatible model">
+                  <input name="default_model" value="{{ default_openai_compatible_model }}" placeholder="gpt-4.1-mini or hosted compatible model">
                 </label>
                 <label>
                   <span>API key</span>
@@ -455,11 +455,11 @@
                 <div class="meta-row">
                   <label>
                     <span>Organization</span>
-                    <input name="organization" value="{{ default_openai_organization }}" placeholder="Optional">
+                    <input name="organization" value="{{ default_openai_compatible_organization }}" placeholder="Optional">
                   </label>
                   <label>
                     <span>Project</span>
-                    <input name="project" value="{{ default_openai_project }}" placeholder="Optional">
+                    <input name="project" value="{{ default_openai_compatible_project }}" placeholder="Optional">
                   </label>
                 </div>
                 <label class="checkbox-field">
@@ -630,12 +630,15 @@
     window.FORGETUNE_DEFAULTS = {
       providerBaseUrls: {
         openai: {{ default_openai_base_url|tojson }},
-        "openai-compatible": {{ default_openai_base_url|tojson }},
+        "openai-compatible": {{ default_openai_compatible_base_url|tojson }},
         ollama: {{ default_ollama_base_url|tojson }}
       },
       defaultOpenaiOrganization: {{ default_openai_organization|tojson }},
       defaultOpenaiProject: {{ default_openai_project|tojson }},
-      defaultOpenaiModel: {{ default_openai_model|tojson }}
+      defaultOpenaiModel: {{ default_openai_model|tojson }},
+      defaultOpenaiCompatibleOrganization: {{ default_openai_compatible_organization|tojson }},
+      defaultOpenaiCompatibleProject: {{ default_openai_compatible_project|tojson }},
+      defaultOpenaiCompatibleModel: {{ default_openai_compatible_model|tojson }}
     };
   </script>
   <script src="/static/app.js" defer></script>

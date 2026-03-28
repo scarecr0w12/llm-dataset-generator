@@ -52,6 +52,7 @@ uvicorn app.main:app --reload
 Use `.env.example` as the starting point for `.env`. The most useful settings are:
 
 - `FORGETUNE_OPENAI_BASE_URL`, `FORGETUNE_OPENAI_API_KEY`, `FORGETUNE_OPENAI_ORGANIZATION`, `FORGETUNE_OPENAI_PROJECT`, `FORGETUNE_OPENAI_MODEL`
+- `FORGETUNE_OPENAI_COMPATIBLE_BASE_URL`, `FORGETUNE_OPENAI_COMPATIBLE_API_KEY`, `FORGETUNE_OPENAI_COMPATIBLE_ORGANIZATION`, `FORGETUNE_OPENAI_COMPATIBLE_PROJECT`, `FORGETUNE_OPENAI_COMPATIBLE_MODEL`
 - `FORGETUNE_OLLAMA_BASE_URL`, `FORGETUNE_OLLAMA_MODEL`
 - `FORGETUNE_GITHUB_BASE_URL`, `FORGETUNE_GITHUB_TOKEN`, `FORGETUNE_GITHUB_REPOSITORY`
 - `FORGETUNE_SEARXNG_BASE_URL`
@@ -63,6 +64,7 @@ These values are used as startup defaults for the UI and backend. Secrets such a
 
 - Saved provider profiles live in the Operate tab and can target `openai`, `openai-compatible`, or `ollama` endpoints.
 - OpenAI: use `https://api.openai.com` and either store the API key in a saved provider profile or set `FORGETUNE_OPENAI_API_KEY` in `.env`.
+- OpenAI-compatible APIs: use the `FORGETUNE_OPENAI_COMPATIBLE_*` variables when you want different defaults for gateways such as vLLM, LiteLLM, OpenRouter, or GitHub Models.
 - Ollama: use `http://host.docker.internal:11434` from inside Docker.
 - vLLM or other OpenAI-compatible APIs: point the base URL to the server root, for example `http://host.docker.internal:8001` if that service exposes `/v1/chat/completions`, `/v1/models`, `/v1/files`, and `/v1/fine_tuning/jobs`.
 - The Capture tab can use a saved provider profile or an ad hoc authenticated request for synthetic example generation.

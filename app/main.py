@@ -55,6 +55,13 @@ DEFAULT_OPENAI_API_KEY = os.getenv("FORGETUNE_OPENAI_API_KEY", "")
 DEFAULT_OPENAI_ORGANIZATION = os.getenv("FORGETUNE_OPENAI_ORGANIZATION", "")
 DEFAULT_OPENAI_PROJECT = os.getenv("FORGETUNE_OPENAI_PROJECT", "")
 DEFAULT_OPENAI_MODEL = os.getenv("FORGETUNE_OPENAI_MODEL", "")
+DEFAULT_OPENAI_COMPATIBLE_BASE_URL = os.getenv("FORGETUNE_OPENAI_COMPATIBLE_BASE_URL", DEFAULT_OPENAI_BASE_URL)
+DEFAULT_OPENAI_COMPATIBLE_API_KEY = os.getenv("FORGETUNE_OPENAI_COMPATIBLE_API_KEY", DEFAULT_OPENAI_API_KEY)
+DEFAULT_OPENAI_COMPATIBLE_ORGANIZATION = os.getenv(
+    "FORGETUNE_OPENAI_COMPATIBLE_ORGANIZATION", DEFAULT_OPENAI_ORGANIZATION
+)
+DEFAULT_OPENAI_COMPATIBLE_PROJECT = os.getenv("FORGETUNE_OPENAI_COMPATIBLE_PROJECT", DEFAULT_OPENAI_PROJECT)
+DEFAULT_OPENAI_COMPATIBLE_MODEL = os.getenv("FORGETUNE_OPENAI_COMPATIBLE_MODEL", DEFAULT_OPENAI_MODEL)
 DEFAULT_SEARXNG_BASE_URL = os.getenv("FORGETUNE_SEARXNG_BASE_URL", "http://host.docker.internal:8080")
 DEFAULT_GITHUB_BASE_URL = os.getenv("FORGETUNE_GITHUB_BASE_URL", "https://api.github.com")
 DEFAULT_GITHUB_TOKEN = os.getenv("FORGETUNE_GITHUB_TOKEN", "")
@@ -333,8 +340,18 @@ def resolve_runtime_config(
         project = DEFAULT_OPENAI_PROJECT
     if provider == "ollama" and not base_url:
         base_url = DEFAULT_OLLAMA_BASE_URL
+    if provider == "openai-compatible" and not base_url:
+        base_url = DEFAULT_OPENAI_COMPATIBLE_BASE_URL
+    if provider == "openai-compatible" and not api_key:
+        api_key = DEFAULT_OPENAI_COMPATIBLE_API_KEY
+    if provider == "openai-compatible" and not organization:
+        organization = DEFAULT_OPENAI_COMPATIBLE_ORGANIZATION
+    if provider == "openai-compatible" and not project:
+        project = DEFAULT_OPENAI_COMPATIBLE_PROJECT
     if provider == "openai" and not model:
         model = DEFAULT_OPENAI_MODEL
+    if provider == "openai-compatible" and not model:
+        model = DEFAULT_OPENAI_COMPATIBLE_MODEL
     if provider == "ollama" and not model:
         model = DEFAULT_OLLAMA_MODEL
     if not model:
@@ -358,11 +375,23 @@ def provider_profile_to_config(profile: ProviderProfile, model: str = "") -> LLM
     api_key = profile.api_key
     if profile.provider_type == "openai" and not api_key:
         api_key = DEFAULT_OPENAI_API_KEY
-    organization = profile.organization or (DEFAULT_OPENAI_ORGANIZATION if profile.provider_type == "openai" else "")
-    project = profile.project or (DEFAULT_OPENAI_PROJECT if profile.provider_type == "openai" else "")
+    if profile.provider_type == "openai-compatible" and not api_key:
+        api_key = DEFAULT_OPENAI_COMPATIBLE_API_KEY
+    organization = profile.organization
+    project = profile.project
+    if profile.provider_type == "openai" and not organization:
+        organization = DEFAULT_OPENAI_ORGANIZATION
+    if profile.provider_type == "openai" and not project:
+        project = DEFAULT_OPENAI_PROJECT
+    if profile.provider_type == "openai-compatible" and not organization:
+        organization = DEFAULT_OPENAI_COMPATIBLE_ORGANIZATION
+    if profile.provider_type == "openai-compatible" and not project:
+        project = DEFAULT_OPENAI_COMPATIBLE_PROJECT
     resolved_model = model or profile.default_model
     if not resolved_model and profile.provider_type == "openai":
         resolved_model = DEFAULT_OPENAI_MODEL
+    if not resolved_model and profile.provider_type == "openai-compatible":
+        resolved_model = DEFAULT_OPENAI_COMPATIBLE_MODEL
     if not resolved_model and profile.provider_type == "ollama":
         resolved_model = DEFAULT_OLLAMA_MODEL
     return LLMConfig(
@@ -511,6 +540,10 @@ async def index(request: Request) -> HTMLResponse:
             "default_openai_organization": DEFAULT_OPENAI_ORGANIZATION,
             "default_openai_project": DEFAULT_OPENAI_PROJECT,
             "default_openai_model": DEFAULT_OPENAI_MODEL,
+            "default_openai_compatible_base_url": DEFAULT_OPENAI_COMPATIBLE_BASE_URL,
+            "default_openai_compatible_organization": DEFAULT_OPENAI_COMPATIBLE_ORGANIZATION,
+            "default_openai_compatible_project": DEFAULT_OPENAI_COMPATIBLE_PROJECT,
+            "default_openai_compatible_model": DEFAULT_OPENAI_COMPATIBLE_MODEL,
             "default_searxng_base_url": DEFAULT_SEARXNG_BASE_URL,
             "default_github_base_url": DEFAULT_GITHUB_BASE_URL,
             "default_github_repository": DEFAULT_GITHUB_REPOSITORY,

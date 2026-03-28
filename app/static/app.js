@@ -296,14 +296,33 @@ function renderProviders() {
 }
 
 function setProviderForm(provider) {
+  const providerType = provider?.provider_type || "openai-compatible";
   field(elements.providerForm, "id").value = provider?.id || "";
   field(elements.providerForm, "name").value = provider?.name || "";
-  field(elements.providerForm, "provider_type").value = provider?.provider_type || "openai-compatible";
-  field(elements.providerForm, "base_url").value = provider?.base_url || providerDefaults[provider?.provider_type || "openai-compatible"];
-  field(elements.providerForm, "default_model").value = provider?.default_model || appDefaults.defaultOpenaiModel || "";
+  field(elements.providerForm, "provider_type").value = providerType;
+  field(elements.providerForm, "base_url").value = provider?.base_url || providerDefaults[providerType];
+  field(elements.providerForm, "default_model").value = provider?.default_model || (
+    providerType === "openai"
+      ? appDefaults.defaultOpenaiModel || ""
+      : providerType === "openai-compatible"
+        ? appDefaults.defaultOpenaiCompatibleModel || ""
+        : ""
+  );
   field(elements.providerForm, "api_key").value = "";
-  field(elements.providerForm, "organization").value = provider?.organization || appDefaults.defaultOpenaiOrganization || "";
-  field(elements.providerForm, "project").value = provider?.project || appDefaults.defaultOpenaiProject || "";
+  field(elements.providerForm, "organization").value = provider?.organization || (
+    providerType === "openai"
+      ? appDefaults.defaultOpenaiOrganization || ""
+      : providerType === "openai-compatible"
+        ? appDefaults.defaultOpenaiCompatibleOrganization || ""
+        : ""
+  );
+  field(elements.providerForm, "project").value = provider?.project || (
+    providerType === "openai"
+      ? appDefaults.defaultOpenaiProject || ""
+      : providerType === "openai-compatible"
+        ? appDefaults.defaultOpenaiCompatibleProject || ""
+        : ""
+  );
   field(elements.providerForm, "verify_ssl").checked = provider?.verify_ssl ?? true;
 }
 
